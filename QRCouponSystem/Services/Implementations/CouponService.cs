@@ -30,104 +30,6 @@ namespace QRCouponSystem.Services.Implementations
 
             return coupons;
         }
-        //public async Task<CouponRedeemResponseDto> RedeemCouponAsync(int userId, CouponRedeemRequestDto request)
-        //{
-        //    await using var transaction = await _context.Database.BeginTransactionAsync();
-
-        //    try
-        //    {
-        //        if (string.IsNullOrWhiteSpace(request.IdempotencyKey))
-        //        {
-        //            request.IdempotencyKey = Guid.NewGuid().ToString();
-        //        }
-        //        var existingTx = await _context.Transactions
-        //            .FirstOrDefaultAsync(x => x.IdempotencyKey == request.IdempotencyKey);
-
-        //        if (existingTx != null)
-        //        {
-        //            return new CouponRedeemResponseDto
-        //            {
-        //                RedemptionStatus = RedemptionStatus.AlreadyProcessed,
-        //                CouponId = existingTx.CouponId,
-        //                UpdatedWalletAmount = await GetWalletBalance(existingTx.UserId)
-        //            };
-        //        }
-
-        //        var coupon = await _context.Coupons
-        //            .FirstOrDefaultAsync(x => x.Code == request.QrCodeValue);
-
-        //        if (coupon == null)
-        //            return new CouponRedeemResponseDto { RedemptionStatus = RedemptionStatus.InvalidCoupon };
-
-        //        if (coupon.ExpiryDate < DateTime.UtcNow)
-        //            return new CouponRedeemResponseDto { RedemptionStatus = RedemptionStatus.Expired };
-
-        //        if (coupon.IsRedeemed)
-        //            return new CouponRedeemResponseDto { RedemptionStatus = RedemptionStatus.AlreadyRedeemed };
-
-        //        var updatedRows = await _context.Database.ExecuteSqlInterpolatedAsync($@"
-        //    UPDATE Coupons
-        //    SET IsRedeemed = 1
-        //    WHERE Id = {coupon.Id} AND IsRedeemed = 0
-        //");
-
-        //        if (updatedRows == 0)
-        //        {
-        //            return new CouponRedeemResponseDto
-        //            {
-        //                RedemptionStatus = RedemptionStatus.ConcurrencyConflict
-        //            };
-        //        }
-
-        //        var wallet = await _context.Wallets
-        //            .FirstOrDefaultAsync(x => x.UserId == userId);
-
-        //        if (wallet == null)
-        //            throw new Exception("Wallet not found");
-
-        //        wallet.Balance += coupon.Value;
-
-        //        var tx = new DbModels.Transaction
-        //        {
-        //            UserId = userId,
-        //            CouponId = coupon.Id,
-        //            Amount = coupon.Value,
-        //            Status = "Success",
-        //            CreatedAt = DateTime.UtcNow,
-        //            IdempotencyKey = request.IdempotencyKey
-        //        };
-
-        //        _context.Transactions.Add(tx);
-
-        //        await _context.SaveChangesAsync();
-        //        await transaction.CommitAsync();
-
-        //        return new CouponRedeemResponseDto
-        //        {
-        //            RedemptionStatus = RedemptionStatus.Success,
-        //            CouponId = coupon.Id,
-        //            UpdatedWalletAmount = wallet.Balance,
-        //            RedeemedAt = DateTime.UtcNow
-        //        };
-        //    }
-        //    catch (DbUpdateConcurrencyException)
-        //    {
-        //        await transaction.RollbackAsync();
-        //        return new CouponRedeemResponseDto
-        //        {
-        //            RedemptionStatus = RedemptionStatus.Error
-        //        };
-        //    }
-        //    catch (Exception)
-        //    {
-        //        await transaction.RollbackAsync();
-        //        return new CouponRedeemResponseDto
-        //        {
-        //            RedemptionStatus = RedemptionStatus.Error
-        //        };
-        //    }
-        //}
-
         public async Task<CouponRedeemResponseDto> RedeemCouponAsync(int userId, CouponRedeemRequestDto request)
         {
             await using var transaction = await _context.Database.BeginTransactionAsync();
@@ -139,7 +41,6 @@ namespace QRCouponSystem.Services.Implementations
                     request.IdempotencyKey = Guid.NewGuid().ToString();
                 }
 
-                // 1. Idempotency check
                 var existingTx = await _context.Transactions
                     .FirstOrDefaultAsync(x => x.IdempotencyKey == request.IdempotencyKey);
 
@@ -154,13 +55,12 @@ namespace QRCouponSystem.Services.Implementations
                     };
                 }
 
-                // 2. Get coupon
                 var coupon = await _context.Coupons
                     .FirstOrDefaultAsync(x => x.Code == request.QrCodeValue);
 
                 if (coupon == null)
                 {
-                    await LogTransaction(userId, 0, 0, request.IdempotencyKey, RedemptionStatus.InvalidCoupon);
+                    await LogTransaction(userId, null, 0, request.IdempotencyKey, RedemptionStatus.InvalidCoupon);
                     await transaction.CommitAsync();
 
                     return new CouponRedeemResponseDto
@@ -191,7 +91,6 @@ namespace QRCouponSystem.Services.Implementations
                     };
                 }
 
-                // 3. Concurrency-safe coupon update
                 var updatedRows = await _context.Database.ExecuteSqlInterpolatedAsync($@"
                     UPDATE Coupons
                     SET IsRedeemed = 1
@@ -209,7 +108,6 @@ namespace QRCouponSystem.Services.Implementations
                     };
                 }
 
-                // 4. Wallet update (safe)
                 var wallet = await _context.Wallets
                     .FirstOrDefaultAsync(x => x.UserId == userId);
 
@@ -221,7 +119,6 @@ namespace QRCouponSystem.Services.Implementations
 
                 wallet.Balance += coupon.Value;
 
-                // 5. Final success transaction
                 await LogTransaction(userId, coupon.Id, coupon.Value, request.IdempotencyKey, RedemptionStatus.Success);
 
                 await _context.SaveChangesAsync();
@@ -256,7 +153,7 @@ namespace QRCouponSystem.Services.Implementations
 
         private async Task LogTransaction(
             int userId,
-            int couponId,
+            int? couponId,
             decimal amount,
             string idempotencyKey,
             RedemptionStatus status)
@@ -264,7 +161,7 @@ namespace QRCouponSystem.Services.Implementations
             var tx = new DbModels.Transaction
             {
                 UserId = userId,
-                CouponId = couponId,
+                CouponId = (int)couponId!,
                 Amount = amount,
                 Status = status.ToString(),
                 CreatedAt = DateTime.UtcNow,
