@@ -30,6 +30,7 @@ namespace QRCouponSystem.Services.Implementations
 
             return coupons;
         }
+
         public async Task<CouponRedeemResponseDto> RedeemCouponAsync(int userId, CouponRedeemRequestDto request)
         {
             await using var transaction = await _context.Database.BeginTransactionAsync();
@@ -40,7 +41,6 @@ namespace QRCouponSystem.Services.Implementations
                 {
                     request.IdempotencyKey = Guid.NewGuid().ToString();
                 }
-
                 var existingTx = await _context.Transactions
                     .FirstOrDefaultAsync(x => x.IdempotencyKey == request.IdempotencyKey);
 
@@ -51,10 +51,10 @@ namespace QRCouponSystem.Services.Implementations
                         RedemptionStatus = RedemptionStatus.AlreadyProcessed,
                         CouponId = existingTx.CouponId,
                         UpdatedWalletAmount = await GetWalletBalance(existingTx.UserId),
-                        RedeemedAt = existingTx.CreatedAt
+                        RedeemedAt = existingTx.CreatedAt,
+                        Message = "Duplicate request detected. Already processed."
                     };
                 }
-
                 var coupon = await _context.Coupons
                     .FirstOrDefaultAsync(x => x.Code == request.QrCodeValue);
 
@@ -65,7 +65,8 @@ namespace QRCouponSystem.Services.Implementations
 
                     return new CouponRedeemResponseDto
                     {
-                        RedemptionStatus = RedemptionStatus.InvalidCoupon
+                        RedemptionStatus = RedemptionStatus.InvalidCoupon,
+                        Message = "Invalid coupon code"
                     };
                 }
 
@@ -76,7 +77,8 @@ namespace QRCouponSystem.Services.Implementations
 
                     return new CouponRedeemResponseDto
                     {
-                        RedemptionStatus = RedemptionStatus.Expired
+                        RedemptionStatus = RedemptionStatus.Expired,
+                        Message = "Coupon has expired"
                     };
                 }
 
@@ -87,7 +89,8 @@ namespace QRCouponSystem.Services.Implementations
 
                     return new CouponRedeemResponseDto
                     {
-                        RedemptionStatus = RedemptionStatus.AlreadyRedeemed
+                        RedemptionStatus = RedemptionStatus.AlreadyRedeemed,
+                        Message = "Coupon already redeemed"
                     };
                 }
 
@@ -104,7 +107,8 @@ namespace QRCouponSystem.Services.Implementations
 
                     return new CouponRedeemResponseDto
                     {
-                        RedemptionStatus = RedemptionStatus.ConcurrencyConflict
+                        RedemptionStatus = RedemptionStatus.ConcurrencyConflict,
+                        Message = "Coupon already being redeemed by another request"
                     };
                 }
 
@@ -129,16 +133,28 @@ namespace QRCouponSystem.Services.Implementations
                     RedemptionStatus = RedemptionStatus.Success,
                     CouponId = coupon.Id,
                     UpdatedWalletAmount = wallet.Balance,
-                    RedeemedAt = DateTime.UtcNow
+                    RedeemedAt = DateTime.UtcNow,
+                    Message = "Coupon redeemed successfully"
                 };
             }
-            catch (Exception)
+            catch (DbUpdateException ex)
             {
                 await transaction.RollbackAsync();
 
                 return new CouponRedeemResponseDto
                 {
-                    RedemptionStatus = RedemptionStatus.Error
+                    RedemptionStatus = RedemptionStatus.Error,
+                    Message = "Database error: " + ex.InnerException?.Message
+                };
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+
+                return new CouponRedeemResponseDto
+                {
+                    RedemptionStatus = RedemptionStatus.Error,
+                    Message = ex.Message
                 };
             }
         }
