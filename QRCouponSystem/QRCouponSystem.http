@@ -1,0 +1,6 @@
+@QRCouponSystem_HostAddress = http://localhost:5073
+
+GET {{QRCouponSystem_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
